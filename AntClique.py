@@ -108,7 +108,7 @@ class AntClique:
         t = self.best_clique_info['req_time']
         c = self.best_clique_info['req_cycles']
 
-        logging.info(f"clique size: {s}, req cycles: {c}, req time: {t:.3f}")
+        logging.info(f"clique size: {s}, req cycles: {c}, req time(ms): {t:.3f}")
         return (s, t, c)
 
 

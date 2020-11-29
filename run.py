@@ -6,10 +6,28 @@ import os
 import argparse
 import numpy as np
 import pandas as pd
+import threading
+from contextlib import contextmanager
+import _thread
 from AntClique import AntClique
 from BranchAndBound import BranchAndBound
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] - %(message)s', datefmt='%H:%M:%S')
+
+class TimeoutException(Exception):
+    pass
+
+@contextmanager
+def time_limit(seconds):
+    timer = threading.Timer(seconds, lambda: _thread.interrupt_main())
+    timer.start()
+    try:
+        yield
+    except KeyboardInterrupt:
+        raise TimeoutException()
+    finally:
+        timer.cancel()
+
 
 def read_graph(graph_loc):
     """Reads dimacs styled graphs"""
@@ -37,7 +55,6 @@ def read_graph(graph_loc):
             else:
                 continue
     
-    #print(graph_adj)
     return graph_adj
 
 def parse_input_args():
@@ -55,6 +72,10 @@ def parse_input_args():
         '-o', '--output-prefix', dest='output_prefix',
         help='Output path for reports.', default='graph-results')
 
+    root_parser.add_argument(
+        '--time-limit', dest='time_limit',
+        help='time limit for each graph run(s).', type=int, default=1200)
+
     parser = argparse.ArgumentParser(description='run')
     subparsers = parser.add_subparsers(dest='method', help='Available methods')
     subparsers.required = True
@@ -63,32 +84,32 @@ def parse_input_args():
     parser_aco = subparsers.add_parser('aco', help='Use ant-clique algorithm', parents=[root_parser])
     parser_aco.add_argument(
         '--ants',
-        dest='num_ants', help='num_ants', default=7)
+        dest='num_ants', help='num_ants', type=int, default=7)
     parser_aco.add_argument(
         '--taomin',
-        dest='taomin', help='taomin', default=0.01)
+        dest='taomin', help='taomin', type=float, default=0.01)
     parser_aco.add_argument(
         '--taomax',
-        dest='taomax', help='taomax', default=4)
+        dest='taomax', help='taomax', type=float, default=4)
     parser_aco.add_argument(
         '--alpha',
-        dest='alpha', help='alpha', default=2)
+        dest='alpha', help='alpha', type=float, default=2)
     parser_aco.add_argument(
         '--rho',
-        dest='rho', help='rho', default=.995)
+        dest='rho', help='rho', type=float, default=.995)
     parser_aco.add_argument(
         '--max_cycles',
-        dest='max_cycles', help='max_cycles', default=1000)
+        dest='max_cycles', help='max_cycles', type=int, default=1000)
     parser_aco.add_argument(
         '--runs_per_graph',
-        dest='runs_per_graph', help='runs_per_graph', default=3)
+        dest='runs_per_graph', help='runs_per_graph', type=int, default=3)
     
 
     # options for bnb
     parser_bnb = subparsers.add_parser('bnb', help='Use Branch and Bound algorithm', parents=[root_parser])
     parser_bnb.add_argument(
         '--lb',
-        dest='lb', help='lower_bound', default=0)
+        dest='lb', help='lower_bound', type=int, default=0)
     
 
     return parser.parse_args()
@@ -101,11 +122,11 @@ if __name__ == "__main__":
     else:
         input_files = [args.input_path]
 
-    output_path = f'{args.output_prefix}.{args.method}'
+    output_path = f'{args.output_prefix}.{args.method}.{len(input_files)}_graphs.csv'
+    results = []
 
     # do method specific processing here
     if args.method == 'aco':
-        results = []
         obj = AntClique(args.num_ants, args.taomin, args.taomax, args.alpha, args.rho, args.max_cycles)
 
         for f in input_files:
@@ -113,7 +134,12 @@ if __name__ == "__main__":
             outputs = []
             for i in range(args.runs_per_graph):
                 logging.info(f'Run {i}')
-                outputs.append(obj.run(graph))
+                try:
+                    with time_limit(args.time_limit):
+                        outputs.append(obj.run(graph))
+                except TimeoutException:
+                    logging.info('Execution timed out!')
+                    continue
             
             sizes = [o[0] for o in outputs]
             times = [o[1] for o in outputs]
@@ -125,42 +151,38 @@ if __name__ == "__main__":
                 'time->mean(stdev)': [f'{np.mean(times):.4f}({np.std(times):.4f})'],
                 'cycles->mean(stdev)': [f'{np.mean(cycles):.4f}({np.std(cycles):.4f})']
             }
-            log_msg = "Final results-> " + ", ".join(f"{k}: {v}" for k, v in out_json.items())
+            log_msg = "Final results-> " + ", ".join(f"{k}: {v[0]}" for k, v in out_json.items())
             
             results.append(pd.DataFrame(out_json))
             logging.info(log_msg)
             print('\n')
 
-
-        combined_results = pd.concat(results)
-        combined_results.to_csv(output_path, index=False)
-
-    if args.method == 'bnb':
-        results = []
+    elif args.method == 'bnb':
         obj = BranchAndBound(args.lb)
 
         for f in input_files:
             graph = read_graph(f)
-            outputs = []
-            outputs.append(obj.run(graph))
+            try:
+                with time_limit(args.time_limit):
+                    size, time = obj.run(graph)
+            except TimeoutException:
+                logging.info('Execution timed out!')
+                continue
             
-            sizes = [o[0] for o in outputs]
-            times = [o[1] for o in outputs]
-
             out_json = {
                 'filename': [f],
-                'size': sizes,
-                'time': times
+                'size': [f'{size:.4f}'],
+                'time': [f'{time:.4f}']
             }
-            log_msg = "Final results-> " + ", ".join(f"{k}: {v}" for k, v in out_json.items())
+            log_msg = "Final results-> " + ", ".join(f"{k}: {v[0]}" for k, v in out_json.items())
             
             results.append(pd.DataFrame(out_json))
             logging.info(log_msg)
             print('\n')
 
 
-        combined_results = pd.concat(results)
-        combined_results.to_csv(output_path, index=False)
+    combined_results = pd.concat(results)
+    combined_results.to_csv(output_path, index=False)
 
 
 
