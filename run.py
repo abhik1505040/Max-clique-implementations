@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from AntClique import AntClique
+from BranchAndBound import BranchAndBound
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] - %(message)s', datefmt='%H:%M:%S')
 
@@ -35,7 +36,8 @@ def read_graph(graph_loc):
                 graph_adj[v2][v1] = l
             else:
                 continue
-
+    
+    #print(graph_adj)
     return graph_adj
 
 def parse_input_args():
@@ -82,7 +84,12 @@ def parse_input_args():
         dest='runs_per_graph', help='runs_per_graph', default=3)
     
 
-    # options for soumits algorithm
+    # options for bnb
+    parser_bnb = subparsers.add_parser('bnb', help='Use Branch and Bound algorithm', parents=[root_parser])
+    parser_bnb.add_argument(
+        '--lb',
+        dest='lb', help='lower_bound', default=0)
+    
 
     return parser.parse_args()
 
@@ -128,7 +135,32 @@ if __name__ == "__main__":
         combined_results = pd.concat(results)
         combined_results.to_csv(output_path, index=False)
 
+    if args.method == 'bnb':
+        results = []
+        obj = BranchAndBound(args.lb)
 
+        for f in input_files:
+            graph = read_graph(f)
+            outputs = []
+            outputs.append(obj.run(graph))
+            
+            sizes = [o[0] for o in outputs]
+            times = [o[1] for o in outputs]
+
+            out_json = {
+                'filename': [f],
+                'size': sizes,
+                'time': times
+            }
+            log_msg = "Final results-> " + ", ".join(f"{k}: {v}" for k, v in out_json.items())
+            
+            results.append(pd.DataFrame(out_json))
+            logging.info(log_msg)
+            print('\n')
+
+
+        combined_results = pd.concat(results)
+        combined_results.to_csv(output_path, index=False)
 
 
 
