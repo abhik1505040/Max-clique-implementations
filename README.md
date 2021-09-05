@@ -56,6 +56,7 @@ p_hat300-2|300|21928|25
       * lb = 0  
 
 *-> graph run didn't finish within time limit (20 mins)
+
 Graph name (best)|Ant-clique -> avg(sdv)|Branch and bound
 ---|---|---
 anna (11)|**11.00(0.00)**|**11**
